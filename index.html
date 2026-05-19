@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XOX</title>
+    <style>
+        body {
+            background-color: #05070a;
+            color: #00ff66;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            user-select: none;
+        }
+        .terminal-container {
+            background: #0d1117;
+            border: 2px solid #00ff66;
+            box-shadow: 0 0 20px rgba(0, 255, 102, 0.2);
+            padding: 20px;
+            border-radius: 8px;
+            width: 360px;
+            box-sizing: border-box;
+        }
+        h1 { font-size: 1.4rem; text-align: center; margin-top: 0; border-bottom: 1px dashed #00ff66; padding-bottom: 10px; }
+        .setup-area { display: flex; flex-direction: column; gap: 10px; }
+        textarea { 
+            background: #161b22; 
+            color: #00ff66; 
+            border: 1px solid #30363d; 
+            border-radius: 4px; 
+            padding: 8px; 
+            resize: none; 
+            font-family: monospace;
+            font-size: 0.8rem;
+        }
+        textarea:focus { border-color: #00ff66; outline: none; }
+        button { 
+            background: #00ff66; 
+            color: #0d1117; 
+            border: none; 
+            padding: 10px; 
+            font-weight: bold; 
+            cursor: pointer; 
+            border-radius: 4px; 
+            font-family: monospace;
+            transition: all 0.2s;
+        }
+        button:hover { background: #00cc52; box-shadow: 0 0 8px rgba(0,255,102,0.5); }
+        .board { display: grid; grid-template-columns: repeat(3, 1fr); grid-gap: 8px; margin-top: 20px; display: none; }
+        .cell { 
+            aspect-ratio: 1;
+            background: #161b22; 
+            border: 1px solid #00ff66; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            font-size: 3rem; 
+            font-weight: bold; 
+            cursor: pointer; 
+            border-radius: 4px;
+        }
+        .cell:hover { background: rgba(0, 255, 102, 0.1); }
+        #status { 
+            margin-top: 15px; 
+            font-size: 0.9rem; 
+            text-align: center; 
+            border-top: 1px dashed #00ff66; 
+            padding-top: 10px;
+            color: #888;
+        }
+        .alert { color: #ff3333 !important; }
+    </style>
+</head>
+<body>
+
+    <div class="terminal-container">
+        <h1>[XOX]</h1>
+        
+        <div class="setup-area" id="setup">
+            <button id="create-btn">1. Odayı Başlat (Offer Git)</button>
+            <textarea id="local-code" rows="3" readonly placeholder="Senin bağlantı kodun burada belirecek..."></textarea>
+            <button id="copy-btn" style="display:none; background:#1f242c; color:#00ff66; border:1px solid #00ff66;">Kodu Kopyala</button>
+            
+            <label style="font-size:0.8rem; margin-top:5px;">2. Karşı Kod Girişi:</label>
+            <textarea id="remote-code" rows="3" placeholder="Arkadaşından gelen kodu buraya yapıştır..."></textarea>
+            <button id="connect-btn">Bağlantıyı Kilitle (Connect)</button>
+        </div>
+
+        <div class="board" id="board">
+            <div class="cell" data-index="0"></div>
+            <div class="cell" data-index="1"></div>
+            <div class="cell" data-index="2"></div>
+            <div class="cell" data-index="3"></div>
+            <div class="cell" data-index="4"></div>
+            <div class="cell" data-index="5"></div>
+            <div class="cell" data-index="6"></div>
+            <div class="cell" data-index="7"></div>
+            <div class="cell" data-index="8"></div>
+        </div>
+
+        <div id="status">> Sistem Ağ Bağlantısı Bekliyor...</div>
+    </div>
+
+    <script>
+
+        const config = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19002' },
+                { urls: 'stun:stun1.l.google.com:19002' },
+                { urls: 'stun:stun.ekiga.net' },
+                { urls: 'turn:numb.viagenie.ca', username: 'webrtc@live.com', credential: 'muazkh<3' }
+            ]
+        };
+
+        const pc = new RTCPeerConnection(config);
+        let dataChannel;
+        let mySign = ''; 
+        let currentTurn = 'X';
+        let boardState = Array(9).fill('');
+
+        const setupArea = document.getElementById('setup');
+        const board = document.getElementById('board');
+        const statusText = document.getElementById('status');
+        const cells = document.querySelectorAll('.cell');
+        const localTextArea = document.getElementById('local-code');
+        const copyBtn = document.getElementById('copy-btn');
+
+        function startGame() {
+            setupArea.style.display = 'none';
+            board.style.display = 'grid';
+            statusText.style.color = '#00ff66';
+            statusText.innerText = `> TÜNEL AKTİF. Sen: ${mySign} | Sıra: X`;
+        }
+
+        function setupDataChannel(channel) {
+            channel.onopen = () => startGame();
+            channel.onmessage = (e) => {
+                const data = JSON.parse(e.data);
+                if (data.type === 'move') makeMove(data.index, data.sign);
+            };
+        }
+
+  
+        pc.onicecandidate = (e) => {
+            if (!e.candidate) {
+                localTextArea.value = btoa(JSON.stringify(pc.localDescription));
+                copyBtn.style.display = 'block';
+                statusText.innerText = "> KOD HAZIR. Kopyala ve arkadaşına gönder.";
+            }
+        };
+
+
+        document.getElementById('create-btn').onclick = async () => {
+            mySign = 'X';
+            statusText.innerText = "> Ağ tüneli açılıyor, bekleyin...";
+            dataChannel = pc.createDataChannel("xox-channel");
+            setupDataChannel(dataChannel);
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+        };
+
+
+        copyBtn.onclick = () => {
+            localTextArea.select();
+            document.execCommand('copy');
+            copyBtn.innerText = "Kopyalandı! ✓";
+            setTimeout(() => copyBtn.innerText = "Kodu Kopyala", 2000);
+        };
+
+        document.getElementById('connect-btn').onclick = async () => {
+            const rawInput = document.getElementById('remote-code').value.trim();
+            if(!rawInput) return;
+            
+            try {
+                const remoteValue = JSON.parse(atob(rawInput));
+                
+                if (remoteValue.type === 'offer') {
+                    mySign = 'O';
+                    statusText.innerText = "> Yanıt kodu oluşturuluyor...";
+                    await pc.setRemoteDescription(new RTCSessionDescription(remoteValue));
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+                } else if (remoteValue.type === 'answer') {
+                    await pc.setRemoteDescription(new RTCSessionDescription(remoteValue));
+                    if (dataChannel && dataChannel.readyState === 'open') {
+                        startGame();
+                    }
+                }
+            } catch (err) {
+                statusText.className = 'alert';
+                statusText.innerText = "> HATA: Geçersiz veya eksik kod girdiniz.";
+            }
+        };
+
+        pc.ondatachannel = (e) => {
+            dataChannel = e.channel;
+            setupDataChannel(dataChannel);
+        };
+
+    
+        cells.forEach(cell => {
+            cell.onclick = () => {
+                const index = cell.getAttribute('data-index');
+                if (currentTurn === mySign && boardState[index] === '') {
+                    makeMove(index, mySign);
+                    dataChannel.send(JSON.stringify({ type: 'move', index: index, sign: mySign }));
+                }
+            };
+        });
+
+        function makeMove(index, sign) {
+            boardState[index] = sign;
+            cells[index].innerText = sign;
+            cells[index].style.color = sign === 'X' ? '#00ff66' : '#ff3333';
+            
+            if (checkWin()) {
+                statusText.innerText = `> OYUN BİTTİ. KAZANAN: ${sign}`;
+                currentTurn = '';
+                return;
+            }
+            if (!boardState.includes('')) {
+                statusText.innerText = "> BERABERE!";
+                return;
+            }
+
+            currentTurn = currentTurn === 'X' ? 'O' : 'X';
+            statusText.innerText = `> Sıra: ${currentTurn}`;
+        }
+
+        function checkWin() {
+            const winPatterns = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+            return winPatterns.some(p => p.every(i => boardState[i] === currentTurn));
+        }
+    </script>
+</body>
+</html>
